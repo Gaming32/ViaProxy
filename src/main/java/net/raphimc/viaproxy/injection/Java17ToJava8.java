@@ -383,20 +383,9 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         }
     }
 
-    private static String findMethodName(ClassNode node, String name, String descriptor) {
-        String foundName;
-        {
-            int i = 0;
-            do {
-                foundName = name + '$' + i;
-            } while (ASMUtils.getMethod(node, foundName, TRANSFER_TO_DESC) != null);
-        }
-        return foundName;
-    }
-
     private void convertMiscMethods(final ClassNode node) {
-        String transferToName = null;
-        String newFileSystemName = null;
+        boolean needsTransferTo = false;
+        boolean needsNewFileSystem = false;
 
         for (MethodNode method : node.methods) {
             for (AbstractInsnNode insn : method.instructions.toArray()) {
@@ -413,9 +402,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                     } else if (min.owner.equals("java/io/InputStream")) {
                         // Java 9+
                         if (min.name.equals("readAllBytes") && min.getOpcode() == Opcodes.INVOKEVIRTUAL) {
-                            if (transferToName == null) {
-                                transferToName = findMethodName(node, "transferTo", TRANSFER_TO_DESC);
-                            }
+                            needsTransferTo = true;
                             list.add(new TypeInsnNode(Opcodes.NEW, "java/io/ByteArrayOutputStream"));
                             list.add(new InsnNode(Opcodes.DUP));
                             list.add(new MethodInsnNode(
@@ -428,7 +415,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                             list.add(new MethodInsnNode(
                                 Opcodes.INVOKESTATIC,
                                 node.name,
-                                transferToName,
+                                "-transferTo-c626934e",
                                 TRANSFER_TO_DESC
                             ));
                             list.add(new InsnNode(Opcodes.POP2));
@@ -440,24 +427,20 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                             ));
                         // Java 9+
                         } else if (min.name.equals("transferTo") && min.getOpcode() == Opcodes.INVOKEVIRTUAL) {
-                            if (transferToName == null) {
-                                transferToName = findMethodName(node, "transferTo", TRANSFER_TO_DESC);
-                            }
+                            needsTransferTo = true;
                             list.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
                                 node.name,
-                                transferToName,
+                                "-transferTo-c626934ez",
                                 TRANSFER_TO_DESC
                             ));
                         }
                     } else if (min.owner.equals("java/nio/file/FileSystems")) {
                         if (min.name.equals("newFileSystem") && min.desc.equals(NEW_FILE_SYSTEM_DESC)) {
-                            if (newFileSystemName == null) {
-                                newFileSystemName = findMethodName(node, "newFileSystem", NEW_FILE_SYSTEM_DESC);
-                            }
+                            needsNewFileSystem = true;
                             list.add(new MethodInsnNode(
                                 Opcodes.INVOKESTATIC,
                                 node.name,
-                                newFileSystemName,
+                                "-newFileSystem-de04efb4",
                                 NEW_FILE_SYSTEM_DESC
                             ));
                         }
@@ -537,18 +520,18 @@ public class Java17ToJava8 implements IBytecodeTransformer {
             }
         }
 
-        if (transferToName != null) {
-            generateTransferTo(transferToName, node);
+        if (needsTransferTo) {
+            generateTransferTo(node);
         }
-        if (newFileSystemName != null) {
-            generateNewFileSystem(newFileSystemName, node);
+        if (needsNewFileSystem) {
+            generateNewFileSystem(node);
         }
     }
 
-    private static void generateTransferTo(String name, ClassVisitor visitor) {
+    private static void generateTransferTo(ClassVisitor visitor) {
         final MethodVisitor transferTo = visitor.visitMethod(
             Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
-            name, TRANSFER_TO_DESC, null, new String[] {"java/io/IOException"}
+            "-transferTo-c626934e", TRANSFER_TO_DESC, null, new String[] {"java/io/IOException"}
         );
         transferTo.visitCode();
 
@@ -623,10 +606,10 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         transferTo.visitEnd();
     }
 
-    private static void generateNewFileSystem(String name, ClassVisitor visitor) {
+    private static void generateNewFileSystem(ClassVisitor visitor) {
         final MethodVisitor newFileSystem = visitor.visitMethod(
             Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
-            name, NEW_FILE_SYSTEM_DESC, null, new String[] {"java/io/IOException"}
+            "-newFileSystem-de04efb4", NEW_FILE_SYSTEM_DESC, null, new String[] {"java/io/IOException"}
         );
         newFileSystem.visitCode();
 
