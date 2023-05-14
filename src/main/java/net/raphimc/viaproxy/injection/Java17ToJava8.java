@@ -23,10 +23,7 @@ import net.lenni0451.classtransform.utils.ASMUtils;
 import net.lenni0451.classtransform.utils.tree.BasicClassProvider;
 import net.lenni0451.classtransform.utils.tree.ClassTree;
 import net.lenni0451.classtransform.utils.tree.IClassProvider;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
+import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +41,8 @@ public class Java17ToJava8 implements IBytecodeTransformer {
     private static final char STACK_ARG_CONSTANT = '\u0001';
     private static final char BSM_ARG_CONSTANT = '\u0002';
 
-    private static final String TRANSFERTO_DESC = "(Ljava/io/InputStream;Ljava/io/OutputStream;)J";
+    private static final String TRANSFER_TO_DESC = "(Ljava/io/InputStream;Ljava/io/OutputStream;)J";
+    private static final String NEW_FILE_SYSTEM_DESC = "(Ljava/nio/file/Path;Ljava/util/Map;Ljava/lang/ClassLoader;)Ljava/nio/file/FileSystem;";
 
     private static final String EQUALS_DESC = "(Ljava/lang/Object;)Z";
     private static final String HASHCODE_DESC = "()I";
@@ -123,14 +121,20 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         this.convertRecords(classNode);
 
         if (calculateStackMapFrames) {
-            final byte[] result = ASMUtils.toBytes(classNode, classTree, classProvider);
+            final byte[] result;
+            try {
+                result = ASMUtils.toBytes(classNode, classTree, classProvider);
+            } catch (Throwable t) {
+                LOGGER.error("Failed to stack map downgraded class {}", className, t);
+                throw t;
+            }
             if (DEBUG_DUMP) {
                 try {
-                    final File file = new File("vp_17to8_dump", classNode.name + ".class");
+                    final File file = new File("j17to8_dump", classNode.name + ".class");
                     file.getParentFile().mkdirs();
                     Files.write(file.toPath(), result);
-                } catch (Throwable e) {
-                    LOGGER.error("Failed to dump class {}", className, e);
+                } catch (Throwable t) {
+                    LOGGER.error("Failed to dump downgraded class {}", className, t);
                 }
             }
             return result;
@@ -140,6 +144,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
     }
 
     private void makePackagePrivate(final ClassNode classNode) {
+        // Java 9's NestHost system gives outer classes direct access to inner class members
         if (classNode.nestHostClass == null) return;
         for (final MethodNode methodNode : classNode.methods) {
             methodNode.access &= ~Opcodes.ACC_PRIVATE;
@@ -149,6 +154,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         }
     }
 
+    // Java 9+
     private void convertStringConcatFactory(final ClassNode node) {
         for (MethodNode method : node.methods) {
             for (AbstractInsnNode instruction : method.instructions.toArray()) {
@@ -192,6 +198,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
 
                     final InsnList list = new InsnList();
 
+                    // Java 9+
                     if (min.name.equals("of")) {
                         final Type[] args = Type.getArgumentTypes(min.desc);
                         if (args.length != 1 || args[0].getSort() != Type.ARRAY) {
@@ -218,6 +225,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                             ));
                             list.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Collections", "unmodifiableList", "(Ljava/util/List;)Ljava/util/List;"));
                         }
+                    // Java 10+
                     } else if (min.name.equals("copyOf")) {
                         list.add(new TypeInsnNode(Opcodes.NEW, "java/util/ArrayList"));
                         list.add(new InsnNode(Opcodes.DUP_X1));
@@ -244,6 +252,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
 
                     final InsnList list = new InsnList();
 
+                    // Java 9+
                     if (min.name.equals("of")) {
                         final Type[] args = Type.getArgumentTypes(min.desc);
                         if (args.length != 1 || args[0].getSort() != Type.ARRAY) {
@@ -263,6 +272,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                             list.add(new VarInsnNode(Opcodes.ALOAD, freeVarIndex));
                             list.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Collections", "unmodifiableSet", "(Ljava/util/Set;)Ljava/util/Set;"));
                         }
+                    // Java 10+
                     } else if (min.name.equals("copyOf")) {
                         list.add(new TypeInsnNode(Opcodes.NEW, "java/util/HashSet"));
                         list.add(new InsnNode(Opcodes.DUP_X1));
@@ -289,6 +299,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
 
                     final InsnList list = new InsnList();
 
+                    // Java 9+
                     if (min.name.equals("of")) {
                         final Type[] args = Type.getArgumentTypes(min.desc);
                         if (args.length != 1 || args[0].getSort() != Type.ARRAY) {
@@ -313,6 +324,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                             list.add(new VarInsnNode(Opcodes.ALOAD, freeVarIndex));
                             list.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/util/Collections", "unmodifiableMap", "(Ljava/util/Map;)Ljava/util/Map;"));
                         }
+                    // Java 10+
                     } else if (min.name.equals("copyOf")) {
                         list.add(new TypeInsnNode(Opcodes.NEW, "java/util/HashMap"));
                         list.add(new InsnNode(Opcodes.DUP_X1));
@@ -339,6 +351,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
 
                     final InsnList list = new InsnList();
 
+                    // Java 16+
                     if (min.name.equals("toList")) {
                         list.add(new MethodInsnNode(
                             Opcodes.INVOKESTATIC,
@@ -370,15 +383,20 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         }
     }
 
-    private void convertMiscMethods(final ClassNode node) {
-        boolean needsTransferTo = false;
-        String transferToName;
+    private static String findMethodName(ClassNode node, String name, String descriptor) {
+        String foundName;
         {
             int i = 0;
             do {
-                transferToName = "transferTo$" + i;
-            } while (ASMUtils.getMethod(node, transferToName, TRANSFERTO_DESC) != null);
+                foundName = name + '$' + i;
+            } while (ASMUtils.getMethod(node, foundName, TRANSFER_TO_DESC) != null);
         }
+        return foundName;
+    }
+
+    private void convertMiscMethods(final ClassNode node) {
+        String transferToName = null;
+        String newFileSystemName = null;
 
         for (MethodNode method : node.methods) {
             for (AbstractInsnNode insn : method.instructions.toArray()) {
@@ -387,13 +405,17 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                     final InsnList list = new InsnList();
 
                     if (min.owner.equals("java/lang/String")) {
+                        // Java 11+
                         if (min.name.equals("isBlank") && min.getOpcode() == Opcodes.INVOKEVIRTUAL) {
                             list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;"));
                             list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/String", "isEmpty", "()Z"));
                         }
                     } else if (min.owner.equals("java/io/InputStream")) {
+                        // Java 9+
                         if (min.name.equals("readAllBytes") && min.getOpcode() == Opcodes.INVOKEVIRTUAL) {
-                            needsTransferTo = true;
+                            if (transferToName == null) {
+                                transferToName = findMethodName(node, "transferTo", TRANSFER_TO_DESC);
+                            }
                             list.add(new TypeInsnNode(Opcodes.NEW, "java/io/ByteArrayOutputStream"));
                             list.add(new InsnNode(Opcodes.DUP));
                             list.add(new MethodInsnNode(
@@ -407,7 +429,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                                 Opcodes.INVOKESTATIC,
                                 node.name,
                                 transferToName,
-                                TRANSFERTO_DESC
+                                TRANSFER_TO_DESC
                             ));
                             list.add(new InsnNode(Opcodes.POP2));
                             list.add(new MethodInsnNode(
@@ -416,35 +438,28 @@ public class Java17ToJava8 implements IBytecodeTransformer {
                                 "toByteArray",
                                 "()[B"
                             ));
+                        // Java 9+
                         } else if (min.name.equals("transferTo") && min.getOpcode() == Opcodes.INVOKEVIRTUAL) {
-                            needsTransferTo = true;
+                            if (transferToName == null) {
+                                transferToName = findMethodName(node, "transferTo", TRANSFER_TO_DESC);
+                            }
                             list.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
                                 node.name,
                                 transferToName,
-                                TRANSFERTO_DESC
+                                TRANSFER_TO_DESC
                             ));
                         }
                     } else if (min.owner.equals("java/nio/file/FileSystems")) {
-                        if (min.name.equals("newFileSystem") && min.desc.equals("(Ljava/nio/file/Path;Ljava/util/Map;Ljava/lang/ClassLoader;)Ljava/nio/file/FileSystem;")) {
-                            list.add(new InsnNode(Opcodes.DUP2_X1));
-                            list.add(new InsnNode(Opcodes.POP2));
-                            list.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/nio/file/Path", "toUri", "()Ljava/net/URI;"));
-                            list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/net/URI", "toString", "()Ljava/lang/String;"));
-                            list.add(new TypeInsnNode(Opcodes.NEW, "java/lang/StringBuilder"));
-                            list.add(new InsnNode(Opcodes.DUP));
-                            list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V"));
-                            list.add(new LdcInsnNode("jar:"));
-                            list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;"));
-                            list.add(new InsnNode(Opcodes.SWAP));
-                            list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;"));
-                            list.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;"));
-                            list.add(new TypeInsnNode(Opcodes.NEW, "java/net/URI"));
-                            list.add(new InsnNode(Opcodes.DUP_X1));
-                            list.add(new InsnNode(Opcodes.SWAP));
-                            list.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/net/URI", "<init>", "(Ljava/lang/String;)V"));
-                            list.add(new InsnNode(Opcodes.DUP_X2));
-                            list.add(new InsnNode(Opcodes.POP));
-                            list.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "java/nio/file/FileSystems", "newFileSystem", "(Ljava/net/URI;Ljava/util/Map;Ljava/lang/ClassLoader;)Ljava/nio/file/FileSystem;"));
+                        if (min.name.equals("newFileSystem") && min.desc.equals(NEW_FILE_SYSTEM_DESC)) {
+                            if (newFileSystemName == null) {
+                                newFileSystemName = findMethodName(node, "newFileSystem", NEW_FILE_SYSTEM_DESC);
+                            }
+                            list.add(new MethodInsnNode(
+                                Opcodes.INVOKESTATIC,
+                                node.name,
+                                newFileSystemName,
+                                NEW_FILE_SYSTEM_DESC
+                            ));
                         }
                     } else if (min.owner.equals("java/util/Objects")) {
                         if (min.name.equals("requireNonNullElse")) {
@@ -522,84 +537,286 @@ public class Java17ToJava8 implements IBytecodeTransformer {
             }
         }
 
-        if (needsTransferTo) {
-            // I compiled this by hand btw
-            final MethodVisitor transferTo = node.visitMethod(
-                Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
-                transferToName, TRANSFERTO_DESC, null, new String[] {"java/io/IOException"}
-            );
-            transferTo.visitCode();
-
-            // Objects.requireNonNull(out, "out");
-            transferTo.visitVarInsn(Opcodes.ALOAD, 1);
-            transferTo.visitLdcInsn("out");
-            transferTo.visitMethodInsn(
-                Opcodes.INVOKESTATIC,
-                "java/util/Objects",
-                "requireNonNull",
-                "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
-                false
-            );
-            transferTo.visitInsn(Opcodes.POP);
-
-            // long transferred = 0;
-            transferTo.visitInsn(Opcodes.LCONST_0);
-            transferTo.visitVarInsn(Opcodes.LSTORE, 2);
-
-            // byte[] buffer = new byte[DEFAULT_BUFFER_SIZE];
-            transferTo.visitIntInsn(Opcodes.SIPUSH, 8192);
-            transferTo.visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_BYTE);
-            transferTo.visitVarInsn(Opcodes.ASTORE, 4);
-
-            // while ((read = this.read(buffer, 0, DEFAULT_BUFFER_SIZE)) >= 0) {
-            final Label whileStart = new Label();
-            final Label whileEnd = new Label();
-            transferTo.visitLabel(whileStart);
-            transferTo.visitVarInsn(Opcodes.ALOAD, 0);
-            transferTo.visitVarInsn(Opcodes.ALOAD, 4);
-            transferTo.visitInsn(Opcodes.ICONST_0);
-            transferTo.visitIntInsn(Opcodes.SIPUSH, 8192);
-            transferTo.visitMethodInsn(
-                Opcodes.INVOKEVIRTUAL,
-                "java/io/InputStream",
-                "read",
-                "([BII)I",
-                false
-            );
-            transferTo.visitInsn(Opcodes.DUP);
-            transferTo.visitVarInsn(Opcodes.ISTORE, 5);
-            transferTo.visitJumpInsn(Opcodes.IFLT, whileEnd);
-
-            // out.write(buffer, 0, read);
-            transferTo.visitVarInsn(Opcodes.ALOAD, 1);
-            transferTo.visitVarInsn(Opcodes.ALOAD, 4);
-            transferTo.visitInsn(Opcodes.ICONST_0);
-            transferTo.visitVarInsn(Opcodes.ILOAD, 5);
-            transferTo.visitMethodInsn(
-                Opcodes.INVOKEVIRTUAL,
-                "java/io/OutputStream",
-                "write",
-                "([BII)V",
-                false
-            );
-
-            // transferred += read;
-            transferTo.visitVarInsn(Opcodes.LLOAD, 2);
-            transferTo.visitVarInsn(Opcodes.ILOAD, 5);
-            transferTo.visitInsn(Opcodes.I2L);
-            transferTo.visitInsn(Opcodes.LADD);
-            transferTo.visitVarInsn(Opcodes.LSTORE, 2);
-
-            // }
-            transferTo.visitJumpInsn(Opcodes.GOTO, whileStart);
-            transferTo.visitLabel(whileEnd);
-
-            // return transferred;
-            transferTo.visitVarInsn(Opcodes.LLOAD, 2);
-            transferTo.visitInsn(Opcodes.LRETURN);
-
-            transferTo.visitEnd();
+        if (transferToName != null) {
+            generateTransferTo(transferToName, node);
         }
+        if (newFileSystemName != null) {
+            generateNewFileSystem(newFileSystemName, node);
+        }
+    }
+
+    private static void generateTransferTo(String name, ClassVisitor visitor) {
+        final MethodVisitor transferTo = visitor.visitMethod(
+            Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+            name, TRANSFER_TO_DESC, null, new String[] {"java/io/IOException"}
+        );
+        transferTo.visitCode();
+
+        // Objects.requireNonNull(out, "out");
+        transferTo.visitVarInsn(Opcodes.ALOAD, 1);
+        transferTo.visitLdcInsn("out");
+        transferTo.visitMethodInsn(
+            Opcodes.INVOKESTATIC,
+            "java/util/Objects",
+            "requireNonNull",
+            "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+            false
+        );
+        transferTo.visitInsn(Opcodes.POP);
+
+        // long transferred = 0;
+        transferTo.visitInsn(Opcodes.LCONST_0);
+        transferTo.visitVarInsn(Opcodes.LSTORE, 2);
+
+        // byte[] buffer = new byte[DEFAULT_BUFFER_SIZE];
+        transferTo.visitIntInsn(Opcodes.SIPUSH, 8192);
+        transferTo.visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_BYTE);
+        transferTo.visitVarInsn(Opcodes.ASTORE, 4);
+
+        // while ((read = this.read(buffer, 0, DEFAULT_BUFFER_SIZE)) >= 0) {
+        final Label whileStart = new Label();
+        final Label whileEnd = new Label();
+        transferTo.visitLabel(whileStart);
+        transferTo.visitVarInsn(Opcodes.ALOAD, 0);
+        transferTo.visitVarInsn(Opcodes.ALOAD, 4);
+        transferTo.visitInsn(Opcodes.ICONST_0);
+        transferTo.visitIntInsn(Opcodes.SIPUSH, 8192);
+        transferTo.visitMethodInsn(
+            Opcodes.INVOKEVIRTUAL,
+            "java/io/InputStream",
+            "read",
+            "([BII)I",
+            false
+        );
+        transferTo.visitInsn(Opcodes.DUP);
+        transferTo.visitVarInsn(Opcodes.ISTORE, 5);
+        transferTo.visitJumpInsn(Opcodes.IFLT, whileEnd);
+
+        // out.write(buffer, 0, read);
+        transferTo.visitVarInsn(Opcodes.ALOAD, 1);
+        transferTo.visitVarInsn(Opcodes.ALOAD, 4);
+        transferTo.visitInsn(Opcodes.ICONST_0);
+        transferTo.visitVarInsn(Opcodes.ILOAD, 5);
+        transferTo.visitMethodInsn(
+            Opcodes.INVOKEVIRTUAL,
+            "java/io/OutputStream",
+            "write",
+            "([BII)V",
+            false
+        );
+
+        // transferred += read;
+        transferTo.visitVarInsn(Opcodes.LLOAD, 2);
+        transferTo.visitVarInsn(Opcodes.ILOAD, 5);
+        transferTo.visitInsn(Opcodes.I2L);
+        transferTo.visitInsn(Opcodes.LADD);
+        transferTo.visitVarInsn(Opcodes.LSTORE, 2);
+
+        // }
+        transferTo.visitJumpInsn(Opcodes.GOTO, whileStart);
+        transferTo.visitLabel(whileEnd);
+
+        // return transferred;
+        transferTo.visitVarInsn(Opcodes.LLOAD, 2);
+        transferTo.visitInsn(Opcodes.LRETURN);
+
+        transferTo.visitEnd();
+    }
+
+    private static void generateNewFileSystem(String name, ClassVisitor visitor) {
+        final MethodVisitor newFileSystem = visitor.visitMethod(
+            Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+            name, NEW_FILE_SYSTEM_DESC, null, new String[] {"java/io/IOException"}
+        );
+        newFileSystem.visitCode();
+
+        // if (path == null)
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 0);
+        final Label if1Label = new Label();
+        newFileSystem.visitJumpInsn(Opcodes.IFNONNULL, if1Label);
+
+        // throw new NullPointerException();
+        newFileSystem.visitTypeInsn(Opcodes.NEW, "java/lang/NullPointerException");
+        newFileSystem.visitInsn(Opcodes.DUP);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKESPECIAL,
+            "java/lang/NullPointerException",
+            "<init>",
+            "()V",
+            false
+        );
+        newFileSystem.visitInsn(Opcodes.ATHROW);
+
+        newFileSystem.visitLabel(if1Label);
+
+        // for (FileSystemProvider provider: FileSystemProvider.installedProviders()) {
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKESTATIC,
+            "java/nio/file/spi/FileSystemProvider",
+            "installedProviders",
+            "()Ljava/util/List;",
+            false
+        );
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/List",
+            "iterator",
+            "()Ljava/util/Iterator;",
+            true
+        );
+        newFileSystem.visitVarInsn(Opcodes.ASTORE, 3);
+        final Label for1StartLabel = new Label();
+        newFileSystem.visitLabel(for1StartLabel);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 3);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/Iterator",
+            "hasNext",
+            "()Z",
+            true
+        );
+        final Label for1EndLabel = new Label();
+        newFileSystem.visitJumpInsn(Opcodes.IFEQ, for1EndLabel);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 3);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/Iterator",
+            "next",
+            "()Ljava/lang/Object;",
+            true
+        );
+        newFileSystem.visitTypeInsn(Opcodes.CHECKCAST, "java/nio/file/spi/FileSystemProvider");
+        newFileSystem.visitVarInsn(Opcodes.ASTORE, 4);
+
+        // try {
+        final Label try1Start = new Label();
+        final Label try1End = new Label();
+        final Label try1Handler = new Label();
+        newFileSystem.visitTryCatchBlock(try1Start, try1End, try1Handler, "java/lang/UnsupportedOperationException");
+        newFileSystem.visitLabel(try1Start);
+
+        // return provider.newFileSystem(path, env);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 4);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 0);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 1);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEVIRTUAL,
+            "java/nio/file/spi/FileSystemProvider",
+            "newFileSystem",
+            "(Ljava/nio/file/Path;Ljava/util/Map;)Ljava/nio/file/FileSystem;",
+            false
+        );
+        newFileSystem.visitInsn(Opcodes.ARETURN);
+
+        // } catch (UnsupportedOperationException uoe) {
+        newFileSystem.visitLabel(try1End);
+        newFileSystem.visitLabel(try1Handler);
+
+        // }
+        newFileSystem.visitInsn(Opcodes.POP);
+
+        // }
+        newFileSystem.visitJumpInsn(Opcodes.GOTO, for1StartLabel);
+        newFileSystem.visitLabel(for1EndLabel);
+
+        // if (loader != null) {
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 3);
+        final Label if2Label = new Label();
+        newFileSystem.visitJumpInsn(Opcodes.IFNULL, if2Label);
+
+        // ServiceLoader<FileSystemProvider> sl = ServiceLoader.load(FileSystemProvider.class, loader);
+        newFileSystem.visitLdcInsn(Type.getObjectType("java/nio/file/spi/FileSystemProvider"));
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 2);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKESTATIC,
+            "java/util/ServiceLoader",
+            "load",
+            "(Ljava/lang/Class;Ljava/lang/ClassLoader;)Ljava/util/ServiceLoader;",
+            false
+        );
+        newFileSystem.visitVarInsn(Opcodes.ASTORE, 3);
+
+        // for (FileSystemProvider provider: sl) {
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 3);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/ServiceLoader",
+            "iterator",
+            "()Ljava/util/Iterator;",
+            true
+        );
+        newFileSystem.visitVarInsn(Opcodes.ASTORE, 4);
+        final Label for2StartLabel = new Label();
+        newFileSystem.visitLabel(for2StartLabel);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 4);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/Iterator",
+            "hasNext",
+            "()Z",
+            true
+        );
+        final Label for2EndLabel = new Label();
+        newFileSystem.visitJumpInsn(Opcodes.IFEQ, for2EndLabel);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 4);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEINTERFACE,
+            "java/util/Iterator",
+            "next",
+            "()Ljava/lang/Object;",
+            true
+        );
+        newFileSystem.visitTypeInsn(Opcodes.CHECKCAST, "java/nio/file/spi/FileSystemProvider");
+        newFileSystem.visitVarInsn(Opcodes.ASTORE, 5);
+
+        // try {
+        final Label try2Start = new Label();
+        final Label try2End = new Label();
+        final Label try2Handler = new Label();
+        newFileSystem.visitTryCatchBlock(try2Start, try2End, try2Handler, "java/lang/UnsupportedOperationException");
+        newFileSystem.visitLabel(try2Start);
+
+        // return provider.newFileSystem(path, env);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 5);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 0);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 1);
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKEVIRTUAL,
+            "java/nio/file/spi/FileSystemProvider",
+            "newFileSystem",
+            "(Ljava/nio/file/Path;Ljava/util/Map;)Ljava/nio/file/FileSystem;",
+            false
+        );
+        newFileSystem.visitInsn(Opcodes.ARETURN);
+
+        // } catch (UnsupportedOperationException uoe) {
+        newFileSystem.visitLabel(try2End);
+        newFileSystem.visitLabel(try2Handler);
+
+        // }
+        newFileSystem.visitInsn(Opcodes.POP);
+
+        // }
+        newFileSystem.visitJumpInsn(Opcodes.GOTO, for2StartLabel);
+        newFileSystem.visitLabel(for2EndLabel);
+
+        // }
+        newFileSystem.visitLabel(if2Label);
+
+        // throw new ProviderNotFoundException("Provider not found");
+        newFileSystem.visitTypeInsn(Opcodes.NEW, "java/nio/file/ProviderNotFoundException");
+        newFileSystem.visitInsn(Opcodes.DUP);
+        newFileSystem.visitLdcInsn("Provider not found");
+        newFileSystem.visitMethodInsn(
+            Opcodes.INVOKESPECIAL,
+            "java/nio/file/ProviderNotFoundException",
+            "<init>",
+            "(Ljava/lang/String;)V",
+            false
+        );
+        newFileSystem.visitInsn(Opcodes.ATHROW);
+
+        newFileSystem.visitEnd();
     }
 
     private void convertRecords(final ClassNode node) {
