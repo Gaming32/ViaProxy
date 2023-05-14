@@ -720,7 +720,7 @@ public class Java17ToJava8 implements IBytecodeTransformer {
         newFileSystem.visitLabel(for1EndLabel);
 
         // if (loader != null) {
-        newFileSystem.visitVarInsn(Opcodes.ALOAD, 3);
+        newFileSystem.visitVarInsn(Opcodes.ALOAD, 2);
         final Label if2Label = new Label();
         newFileSystem.visitJumpInsn(Opcodes.IFNULL, if2Label);
 
